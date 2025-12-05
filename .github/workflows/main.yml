@@ -1,0 +1,86 @@
+name: Build
+
+on:
+  push:
+  pull_request:
+    branches: [ master ]
+  schedule:
+  - cron: '0 0 * * *'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Get variables
+      id: get_variables
+      run: |
+        case ${{ github.ref }} in
+          refs/tags/*)
+            TAG=`echo ${{ github.ref }} | sed 's/^refs\/tags\///'`
+            OUTPUT_FILE=alinstaller-`date -u +%Y.%m.%d`-$TAG-x86_64.iso
+            echo "::set-output name=tag::$TAG"
+            echo "::set-output name=output_file::$OUTPUT_FILE"
+            echo "Tag: $TAG"
+            echo "Output file: $OUTPUT_FILE"
+            ;;
+          *)
+            OUTPUT_FILE=alinstaller-`date -u +%Y.%m.%d`-debug-x86_64.iso
+            echo "::set-output name=output_file::$OUTPUT_FILE"
+            echo "Output file: $OUTPUT_FILE"
+            ;;
+        esac
+
+    - name: Checkout code
+      uses: actions/checkout@v2
+
+    - name: Build project
+      run: |
+        docker pull archlinux:base
+        docker run -d -i -t --privileged -v `pwd`:/root/repo --name build archlinux:base
+        docker exec -t build pacman-key --init
+        docker exec -t build pacman-key --populate archlinux
+        docker exec -t build pacman -Syy --noconfirm
+        docker exec -t build pacman -Su --noconfirm
+        docker exec -t build pacman -S --needed --noconfirm base base-devel archiso gtk3 python-astroid python-babel python-gobject python-isort python-mccabe python-platformdirs python-psutil python-pylint python-pythondialog python-setuptools python-toml
+        docker exec -t build sed -E -i 's/^(ParallelDownloads )/#\1/' /usr/share/archiso/configs/releng/pacman.conf # Workaround pacman parallel download problems
+        docker exec -t build bash -c "cd /root/repo && ./check.sh && ./build.sh"
+        cd build/out
+        sudo mv alinstaller.iso ${{ steps.get_variables.outputs.output_file }}
+        sha256sum -b ${{ steps.get_variables.outputs.output_file }} | sudo tee sha256sum.txt
+        sudo chown $USER:$USER ${{ steps.get_variables.outputs.output_file }} sha256sum.txt
+
+    - name: Create release
+      id: create_release
+      uses: actions/create-release@v1
+      if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: ${{ github.ref }}
+        release_name: ${{ steps.get_variables.outputs.tag }}
+        body: Release ${{ steps.get_variables.outputs.tag }}.
+        draft: false
+        prerelease: true
+
+    - name: Upload release ISO image
+      uses: actions/upload-release-asset@v1
+      if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: build/out/${{ steps.get_variables.outputs.output_file }}
+        asset_name: ${{ steps.get_variables.outputs.output_file }}
+        asset_content_type: application/x-cd-image
+
+    - name: Upload release checksum
+      uses: actions/upload-release-asset@v1
+      if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: build/out/sha256sum.txt
+        asset_name: sha256sum.txt
+        asset_content_type: text/plain

@@ -37,3 +37,4 @@ languages need to be added to `src/lang.txt` and `misc/*.desktop`. Run
 `make-locale.sh` to regenerate the locale files.
 # installer
 # installer
+# installer

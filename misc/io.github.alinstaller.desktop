@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=AL Installer
+Comment=Install Arch Linux
+Icon=software-update-available
+Exec=alinstaller --gui
+Terminal=false
+Type=Application
+Categories=GTK;System;
+Keywords=Install;
+StartupNotify=true
